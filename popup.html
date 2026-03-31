@@ -1,0 +1,71 @@
+﻿<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>表格工具</title>
+    <style>
+      body {
+        margin: 0;
+        width: 290px;
+        font-family: "Microsoft YaHei", "PingFang SC", sans-serif;
+        background: #f8fafc;
+        color: #1f2937;
+      }
+
+      .wrap {
+        padding: 14px;
+      }
+
+      h3 {
+        margin: 0 0 10px;
+        font-size: 16px;
+      }
+
+      .btn {
+        width: 100%;
+        height: 36px;
+        border: none;
+        border-radius: 8px;
+        cursor: pointer;
+        font-size: 14px;
+      }
+
+      .sync {
+        background: #1677ff;
+        color: #fff;
+      }
+
+      .export {
+        margin-top: 8px;
+        background: #16a34a;
+        color: #fff;
+      }
+
+      .settings {
+        margin-top: 8px;
+        background: #e5e7eb;
+        color: #111827;
+      }
+
+      #status {
+        margin-top: 10px;
+        font-size: 12px;
+        line-height: 1.45;
+        color: #6b7280;
+        min-height: 38px;
+      }
+    </style>
+  </head>
+  <body>
+    <div class="wrap">
+      <h3>表格同步与导出</h3>
+      <button id="syncBtn" class="btn sync">同步到飞书</button>
+      <button id="exportBtn" class="btn export">导出当前页Excel</button>
+      <button id="settingsBtn" class="btn settings">打开飞书设置</button>
+      <div id="status">可选择同步到飞书，或直接导出 Excel。</div>
+    </div>
+
+    <script src="popup.js"></script>
+  </body>
+</html>

@@ -1,0 +1,23 @@
+﻿{
+  "manifest_version": 3,
+  "name": "Table Sync & Excel Export",
+  "description": "同步页面表格到飞书多维表格，或一键导出为 Excel",
+  "version": "0.3.0",
+  "permissions": ["storage", "tabs"],
+  "host_permissions": ["https://open.feishu.cn/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["content.js"],
+      "run_at": "document_idle"
+    }
+  ],
+  "options_page": "options.html",
+  "action": {
+    "default_title": "表格工具",
+    "default_popup": "popup.html"
+  }
+}
