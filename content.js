@@ -42,7 +42,8 @@
     panel.style.cssText = [
       "position:fixed",
       "right:20px",
-      "bottom:20px",
+      "top:50%",
+      "transform:translateY(-50%)",
       "z-index:2147483647",
       "display:flex",
       "flex-direction:column",
@@ -145,6 +146,8 @@
   }
 
   async function extractTableData() {
+    await preparePageForCapture();
+
     const table = findBestTable();
     if (!table) {
       throw new Error("页面中未找到可识别的表格");
@@ -205,6 +208,75 @@
       columns,
       rows,
     };
+  }
+
+  async function preparePageForCapture() {
+    const phoneRevealed = await revealPhoneColumnIfHidden();
+    if (phoneRevealed) {
+      await waitForRender(800);
+    }
+  }
+
+  async function revealPhoneColumnIfHidden() {
+    const table = findBestTable();
+    if (!table) {
+      return false;
+    }
+
+    const phoneColumnIndex = findPhoneColumnIndex(table);
+    if (phoneColumnIndex < 0 || tableColumnHasPhoneNumber(table, phoneColumnIndex)) {
+      return false;
+    }
+
+    const phoneHeader = Array.from(table.querySelectorAll("thead th"))[phoneColumnIndex];
+    const trigger = phoneHeader?.querySelector('[data-log-name="查看手机号"]');
+    if (!trigger) {
+      return false;
+    }
+
+    clickLikeUser(trigger);
+    await waitForCondition(() => tableColumnHasPhoneNumber(table, phoneColumnIndex), 5000);
+    return true;
+  }
+
+  function findPhoneColumnIndex(table) {
+    const headers = Array.from(table.querySelectorAll("thead th"));
+    return headers.findIndex((header) => {
+      const name = cleanHeaderName(readText(header), 0).replace(/\s+/g, "");
+      return /^(电话|手机号|手机|联系电话)/.test(name);
+    });
+  }
+
+  function tableColumnHasPhoneNumber(table, columnIndex) {
+    return Array.from(table.querySelectorAll("tbody tr")).some((row) => {
+      const cell = row.querySelectorAll("td")[columnIndex];
+      return /(?:\+?86[-\s]?)?1[3-9]\d{9}/.test(readText(cell));
+    });
+  }
+
+  function clickLikeUser(element) {
+    if (!element) {
+      return;
+    }
+
+    for (const type of ["pointerdown", "mousedown", "mouseup", "click"]) {
+      element.dispatchEvent(new MouseEvent(type, { bubbles: true, cancelable: true, view: window }));
+    }
+
+    if (typeof element.click === "function") {
+      element.click();
+    }
+  }
+
+  async function waitForCondition(predicate, timeoutMs) {
+    const startedAt = Date.now();
+    while (Date.now() - startedAt < timeoutMs) {
+      if (predicate()) {
+        return true;
+      }
+      await waitForRender(150);
+    }
+    return false;
   }
 
 
