@@ -7,7 +7,8 @@ const DOUYIN_FIELD_MAPPINGS = [
   { targetName: "微信备注名称", sourceNames: ["姓名", "微信备注名称"] },
   { targetName: "线索时间", sourceNames: ["线索创建时间", "线索时间"] },
   { targetName: "来源", defaultValue: "付费流", alwaysUseDefault: true },
-  { targetName: "手机号", sourceNames: ["电话", "手机号", "手机", "联系电话"] },
+  { targetName: "手机号", sourceNames: ["电话", "手机号", "手机", "联系电话"], transform: "phoneNumber" },
+  { targetName: "所在城市", sourceNames: ["所在城市", "电话", "手机号", "手机", "联系电话"], transform: "cityFromPhoneCell" },
   { targetName: "销售", sourceNames: ["跟进员工", "销售"] },
   { targetName: "首次触达情况", sourceNames: ["最新跟进记录", "首次触达情况"] },
   { targetName: "跟进阶段", sourceNames: ["线索阶段", "跟进阶段"] },
@@ -61,13 +62,25 @@ async function handleSync(payload) {
   }
 
   const allColumns = [...selectedColumns, ...metadataColumns];
-
   const existingFieldNames = await getExistingFieldNames(runtimeConfig, tenantToken);
   if (runtimeConfig.autoCreateFields !== false) {
     await createMissingFields(runtimeConfig, tenantToken, allColumns, existingFieldNames);
   }
 
-  const records = buildRecords(payload, selectedColumns, metadataColumns);
+  const missingSelectedColumns = selectedColumns.filter((col) => !existingFieldNames.has(col.name));
+  if (missingSelectedColumns.length > 0) {
+    const missingNames = missingSelectedColumns.map((col) => col.name).join("、");
+    throw new Error(`目标多维表格缺少字段：${missingNames}。请在插件设置中勾选“自动在飞书中创建缺失字段”，或先手动创建这些列后再同步。`);
+  }
+
+  const writableSelectedColumns = filterColumnsByExistingFieldNames(selectedColumns, existingFieldNames);
+  const writableMetadataColumns = filterColumnsByExistingFieldNames(metadataColumns, existingFieldNames);
+
+  if (writableSelectedColumns.length === 0) {
+    throw new Error("目标多维表格中没有可写入的对应字段，请先确认表头已存在：微信备注名称、线索时间、来源、手机号、销售、首次触达情况、跟进阶段");
+  }
+
+  const records = buildRecords(payload, writableSelectedColumns, writableMetadataColumns);
   if (records.length === 0) {
     throw new Error("所有行都为空，未写入飞书");
   }
@@ -136,6 +149,9 @@ function buildRecords(payload, selectedColumns, metadataColumns) {
 
     for (const col of selectedColumns) {
       let value = normalizeCellValue(row[col.sourceKey || col.key]);
+      if (col.transform) {
+        value = transformMappedValue(value, col.transform);
+      }
       if (col.alwaysUseDefault) {
         value = normalizeCellValue(col.defaultValue);
       } else if (value === "" && col.defaultValue !== undefined) {
@@ -184,8 +200,41 @@ function buildDouyinMappedColumns(columns) {
       name: mapping.targetName,
       defaultValue: mapping.defaultValue,
       alwaysUseDefault: mapping.alwaysUseDefault === true,
+      transform: mapping.transform || "",
     };
   }).filter(Boolean);
+}
+
+function transformMappedValue(value, transform) {
+  if (transform === "phoneNumber") {
+    return extractPhoneNumber(value);
+  }
+
+  if (transform === "cityFromPhoneCell") {
+    return extractCityFromPhoneCell(value);
+  }
+
+  return value;
+}
+
+function extractPhoneNumber(value) {
+  const text = normalizeCellValue(value);
+  const match = text.match(/(?:\+?86[-\s]?)?1[3-9]\d{9}/);
+  if (match) {
+    return match[0].replace(/^\+?86[-\s]?/, "");
+  }
+
+  return text.replace(/所在城市\s*[:：].*$/, "").trim();
+}
+
+function extractCityFromPhoneCell(value) {
+  const text = normalizeCellValue(value);
+  const match = text.match(/所在城市\s*[:：]\s*(.+)$/);
+  if (match) {
+    return match[1].trim();
+  }
+
+  return /(?:\+?86[-\s]?)?1[3-9]\d{9}/.test(text) ? "" : text;
 }
 
 function countDouyinSourceFieldMatches(columns) {
@@ -220,6 +269,14 @@ function normalizeColumnName(value) {
     .replace(/[\s:：]+/g, "")
     .trim()
     .toLowerCase();
+}
+
+function filterColumnsByExistingFieldNames(columns, existingFieldNames) {
+  if (!Array.isArray(columns) || columns.length === 0) {
+    return [];
+  }
+
+  return columns.filter((col) => existingFieldNames.has(col?.name));
 }
 
 async function dedupeRecordsBeforeCreate(config, token, records) {
@@ -751,6 +808,9 @@ function buildFeishuCodeError(code, msg) {
   const errorMsg = msg || "未知错误";
   const commonPrefix = `飞书接口错误(${code}): ${errorMsg}`;
 
+  if (code === 91403) {
+    return `${commonPrefix}。当前应用没有目标云文档/多维表格的访问权限。请在目标多维表格右上角为该应用添加权限；如果开启了高级权限，请给应用“可管理”或至少可编辑权限，并确认应用已开通并发布多维表格相关 API 权限。`;
+  }
   if (code === 1254003 || code === 1254040) {
     return `${commonPrefix}。app_token 错误：请使用 base 链接 /base/ 后的 token，wiki 链接需先解析为 obj_token。`;
   }

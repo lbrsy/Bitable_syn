@@ -80,10 +80,10 @@
 
     const btn = document.getElementById(EXPORT_BUTTON_ID);
     exporting = true;
-    setButtonState(btn, "导出中...", true);
+    setButtonState(btn, "采集表格中...", true);
 
     try {
-      const payload = extractTableData();
+      const payload = await extractTableData();
       if (!payload.rows.length) {
         throw new Error("当前页面没有可导出的表格行数据");
       }
@@ -111,7 +111,7 @@
     setButtonState(btn, "同步中...", true);
 
     try {
-      const payload = extractTableData();
+      const payload = await extractTableData();
       if (!payload.rows.length) {
         throw new Error("当前页面没有可同步的表格行数据");
       }
@@ -144,7 +144,7 @@
     }
   }
 
-  function extractTableData() {
+  async function extractTableData() {
     const table = findBestTable();
     if (!table) {
       throw new Error("页面中未找到可识别的表格");
@@ -170,16 +170,8 @@
 
     headers = makeUnique(headers);
 
-    const matrix = rowElements
-      .map((row) => {
-        const cells = Array.from(row.querySelectorAll("td"));
-        if (cells.length === 0) {
-          return null;
-        }
-        const values = headers.map((_, index) => readText(cells[index]));
-        return values;
-      })
-      .filter(Boolean);
+    const snapshots = await collectTableRowSnapshots(table, headers, rowElements);
+    const matrix = snapshots.map((snapshot) => snapshot.values);
 
     const keepIndexes = headers
       .map((name, index) => ({
@@ -215,6 +207,111 @@
     };
   }
 
+
+  async function collectTableRowSnapshots(table, headers, initialRowElements) {
+    const directSnapshots = readRowSnapshots(initialRowElements, headers);
+    const expectedRowCount = getExpectedBodyRowCount(table);
+    const scrollContainer = findScrollableTableContainer(table);
+
+    if (!scrollContainer || !expectedRowCount || directSnapshots.length >= expectedRowCount) {
+      return directSnapshots;
+    }
+
+    const originalScrollTop = scrollContainer.scrollTop;
+    const snapshotsByKey = new Map();
+    const rowHeight = getEstimatedRowHeight(table);
+    const step = Math.max(Math.floor(scrollContainer.clientHeight * 0.7), rowHeight * 6, 1);
+    let nextTop = 0;
+
+    try {
+      for (let i = 0; i < 80; i += 1) {
+        scrollContainer.scrollTop = nextTop;
+        await waitForRender(140);
+
+        for (const snapshot of readRowSnapshots(Array.from(table.querySelectorAll("tbody tr")), headers)) {
+          snapshotsByKey.set(snapshot.key, snapshot);
+        }
+
+        if (snapshotsByKey.size >= expectedRowCount) {
+          break;
+        }
+
+        const maxScrollTop = Math.max(scrollContainer.scrollHeight - scrollContainer.clientHeight, 0);
+        if (nextTop >= maxScrollTop) {
+          break;
+        }
+
+        nextTop = Math.min(nextTop + step, maxScrollTop);
+      }
+    } finally {
+      scrollContainer.scrollTop = originalScrollTop;
+      await waitForRender(60);
+    }
+
+    const scrolledSnapshots = Array.from(snapshotsByKey.values()).sort((a, b) => {
+      if (a.rowIndex !== b.rowIndex) {
+        return a.rowIndex - b.rowIndex;
+      }
+      return a.order - b.order;
+    });
+
+    return scrolledSnapshots.length > directSnapshots.length ? scrolledSnapshots : directSnapshots;
+  }
+
+  function readRowSnapshots(rowElements, headers) {
+    return rowElements
+      .map((row, order) => {
+        const cells = Array.from(row.querySelectorAll("td"));
+        if (cells.length === 0) {
+          return null;
+        }
+
+        const values = headers.map((_, index) => readText(cells[index]));
+        if (!values.some((value) => value.trim() !== "")) {
+          return null;
+        }
+
+        const rowIndex = Number(row.getAttribute("aria-rowindex")) || 0;
+        return {
+          key: rowIndex ? `row:${rowIndex}` : `content:${values.join("||")}`,
+          rowIndex,
+          order,
+          values,
+        };
+      })
+      .filter(Boolean);
+  }
+
+  function getExpectedBodyRowCount(table) {
+    const ariaRowCount = Number(table.getAttribute("aria-rowcount")) || 0;
+    if (!ariaRowCount) {
+      return 0;
+    }
+
+    return Math.max(ariaRowCount - table.querySelectorAll("thead tr").length, 0);
+  }
+
+  function findScrollableTableContainer(table) {
+    let current = table.parentElement;
+    while (current && current !== document.documentElement) {
+      const style = window.getComputedStyle(current);
+      const canScrollY = /(auto|scroll)/.test(style.overflowY) || current.scrollHeight > current.clientHeight + 4;
+      if (canScrollY && current.scrollHeight > current.clientHeight + 4) {
+        return current;
+      }
+      current = current.parentElement;
+    }
+    return null;
+  }
+
+  function getEstimatedRowHeight(table) {
+    const row = Array.from(table.querySelectorAll("tbody tr")).find((item) => item.offsetHeight > 0);
+    return row?.offsetHeight || 56;
+  }
+
+  function waitForRender(ms) {
+    return new Promise((resolve) => window.setTimeout(resolve, ms));
+  }
   function findBestTable() {
     const tables = Array.from(document.querySelectorAll("table"));
     if (!tables.length) {
